@@ -76,6 +76,7 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix ".debug"
+            versionNameSuffix "-icon-test"
             debuggable true
             minifyEnabled false
         }
@@ -136,6 +137,10 @@ android {
     }
 
     sourceSets {
+        debug {
+            res.srcDirs = ['res_debug']
+        }
+
         test {
             java.srcDirs = ['tests/unit']
             kotlin.directories.addAll(['tests/unit'])

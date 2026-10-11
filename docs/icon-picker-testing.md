@@ -15,6 +15,14 @@ icons declared in `appfilter.xml`. Missing drawable resources are excluded.
 - **Default (global)** removes the per-app override and follows the global pack.
 - **Original app icon** uses the system icon even when a global pack is selected.
 
+## Installing alongside the regular app
+
+The debug build is named **Murine Test**, uses package `app.murinelauncher.debug`,
+and shows version suffix `-icon-test`. It can be installed alongside
+`app.murinelauncher` and has separate launcher settings and data. Build the
+`assembleAospWithoutQuickstepDebug` variant and install its APK. To use it as the
+home screen, select **Murine Test** in Android's default home app settings.
+
 ## Automated verification
 
 Run `testAospWithoutQuickstepDebugUnitTest --tests
