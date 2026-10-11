@@ -16,7 +16,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.core.content.pm.PackageInfoCompat
-import androidx.core.content.res.ResourcesCompat
 import androidx.preference.EditTextPreference
 import androidx.preference.Preference
 import androidx.preference.PreferenceGroupAdapter
@@ -28,7 +27,6 @@ import app.lawnchair.icons.setCustomInstanceLabelForId
 import app.lawnchair.icons.setCustomLabelForKey
 import app.murinelauncher.icons.IconPackManager
 import app.murinelauncher.icons.IconPackManager.IconPackInfo
-import app.murinelauncher.widget.radio.RadioGroupBottomSheet
 import com.android.launcher3.LauncherAppState
 import com.android.launcher3.R
 import com.android.launcher3.Utilities
@@ -185,14 +183,23 @@ class AppInfoPreferenceFragment : SettingsBasePreferenceFragment() {
         val pref = screen.findPreference<IconPickerPreference>(KEY_ICON_PACK) ?: return
         iconPackPref = pref
 
+        parentFragmentManager.setFragmentResultListener(IconPickerBottomSheet.RESULT_KEY, this) { _, result ->
+            if (result.getString(IconPickerBottomSheet.KEY_COMPONENT) != compKey) return@setFragmentResultListener
+            val pack = result.getString(IconPickerBottomSheet.KEY_PACK)
+            if (pack == null) IconPackManager.resetComponentOverride(ctx, compKey)
+            else IconPackManager.setComponentOverride(ctx, compKey, pack, result.getString(IconPickerBottomSheet.KEY_DRAWABLE))
+            updateIconPackSummary(ctx, compKey)
+            refreshIconForPackage(ctx, pkg)
+        }
+
         entries = IconPackManager.buildIconPackEntries(ctx, compKey)
         updateIconPackSummary(ctx, compKey)
 
         pref.setOnPreferenceClickListener {
-            showFilterableIconPackSheet(ctx, compKey, pkg)
+            showIconPickerSheet(ctx, compKey)
             true
         }
-        pref.onPickIconClick = { showIconPickerSheet(ctx, compKey, pkg) }
+        pref.onPickIconClick = { showIconPickerSheet(ctx, compKey) }
     }
 
     private fun updateIconPackSummary(ctx: Context, compKey: String) {
@@ -204,13 +211,11 @@ class AppInfoPreferenceFragment : SettingsBasePreferenceFragment() {
         }
         val customIcon = IconPackManager.getComponentCustomIcon(ctx, compKey)
         iconPackPref?.summary = if (customIcon != null) "$packLabel • $customIcon" else packLabel
-        // Custom icon picking only makes sense for a real icon pack
-        iconPackPref?.pickButtonVisible = overridePack != null && overridePack != IconPackManager.SYSTEM_ICON_PACK
+        iconPackPref?.pickButtonVisible = true
     }
 
-    private fun showIconPickerSheet(ctx: Context, compKey: String, pkg: String) {
-        val pack = IconPackManager.getComponentOverridePack(ctx, compKey) ?: return
-        if (pack == IconPackManager.SYSTEM_ICON_PACK) return
+    private fun showIconPickerSheet(ctx: Context, compKey: String) {
+        val pack = IconPackManager.getEffectivePack(ctx, compKey)
         val fm = parentFragmentManager
 
         fm.findFragmentByTag(IconPickerBottomSheet.TAG)?.let {
@@ -218,61 +223,9 @@ class AppInfoPreferenceFragment : SettingsBasePreferenceFragment() {
             fm.executePendingTransactions()
         }
 
-        val packLabel = entries.firstOrNull { it.packageName == pack }?.label ?: pack
         val sheet = IconPickerBottomSheet()
-        sheet.configure(pack, packLabel, compKey) { drawableName ->
-            IconPackManager.setComponentOverride(ctx, compKey, pack, drawableName)
-            updateIconPackSummary(ctx, compKey)
-            refreshIconForPackage(ctx, pkg)
-        }
+        sheet.configure(pack, ctx.getString(R.string.pref_category_icon_pack_title), compKey)
         sheet.show(fm, IconPickerBottomSheet.TAG)
-    }
-
-    private fun showFilterableIconPackSheet(ctx: Context, compKey: String, pkg: String) {
-        val fm = parentFragmentManager
-
-        fm.findFragmentByTag(RadioGroupBottomSheet.TAG)?.let {
-            fm.beginTransaction().remove(it).commitAllowingStateLoss()
-            fm.executePendingTransactions()
-        }
-
-        val currentOverride = IconPackManager.getComponentOverridePack(ctx, compKey)
-        val currentIdx = if (currentOverride == null) 0 else {
-            val idx = entries.indexOfFirst { it.packageName == currentOverride }
-            if (idx >= 0) idx else 0
-        }
-
-        val hasIcon = BooleanArray(entries.size) { i ->
-            IconPackManager.isPackVisibleForComponent(ctx, entries[i], compKey)
-        }
-
-        val sheet = FilterableIconPackSheet()
-        sheet.configure(
-            title = ctx.getString(R.string.pref_category_icon_pack_title),
-            entryCount = entries.size,
-            iconPosition = RadioGroupBottomSheet.IconPosition.START,
-            currentIndex = currentIdx,
-            textProvider = { i -> entries[i].label },
-            iconProvider = { i ->
-                val p = entries[i].packageName
-                if (p == IconPackManager.ICON_PACK_DEFAULT_GLOBAL)
-                    ResourcesCompat.getDrawable(resources, R.drawable.ic_app_info_icon_pack, ctx.theme)
-                else IconPackManager.getPackIcon(ctx, p)
-            },
-            iconTint = null,
-            isVisibleProvider = { i -> sheet.showAll || hasIcon[i] },
-            listener = RadioGroupBottomSheet.OnItemSelectedListener { index ->
-                val selected = entries[index]
-                if (selected.packageName == IconPackManager.ICON_PACK_DEFAULT_GLOBAL) {
-                    IconPackManager.resetComponentOverride(ctx, compKey)
-                } else {
-                    IconPackManager.setComponentOverride(ctx, compKey, selected.packageName)
-                }
-                updateIconPackSummary(ctx, compKey)
-                refreshIconForPackage(ctx, pkg)
-            }
-        )
-        sheet.show(fm, RadioGroupBottomSheet.TAG)
     }
 
     private fun refreshIconForPackage(context: Context, packageName: String) {

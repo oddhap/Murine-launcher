@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
+    android:layout_height="match_parent"
     android:orientation="vertical"
     android:paddingBottom="8dp">
 
@@ -22,6 +22,47 @@
         android:paddingEnd="24dp"
         android:paddingBottom="12dp" />
 
+    <Spinner
+        android:id="@+id/icon_pack_selector"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_marginHorizontal="24dp"
+        android:contentDescription="@string/pref_category_icon_pack_title" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="24dp"
+        android:orientation="horizontal">
+        <Button
+            android:id="@+id/icon_reset_default"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="@string/app_info_icon_pack_default" />
+        <Button
+            android:id="@+id/icon_use_system"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="@string/icon_picker_system_icon" />
+    </LinearLayout>
+
+    <Button
+        android:id="@+id/icon_use_pack_default"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="24dp"
+        android:text="@string/icon_picker_pack_default" />
+
+    <TextView
+        android:id="@+id/icon_picker_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="24dp"
+        android:paddingVertical="8dp"
+        android:accessibilityLiveRegion="polite" />
+
     <EditText
         android:id="@+id/search_bar"
         android:layout_width="match_parent"
@@ -40,7 +81,8 @@
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/icon_grid"
         android:layout_width="match_parent"
-        android:layout_height="420dp"
+        android:layout_height="0dp"
+        android:layout_weight="1"
         android:layout_marginTop="4dp"
         android:paddingHorizontal="16dp"
         android:clipToPadding="false" />

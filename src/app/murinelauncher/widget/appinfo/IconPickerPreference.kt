@@ -16,7 +16,7 @@ class IconPickerPreference @JvmOverloads constructor(context: Context, attrs: At
     /** Invoked when the widget button is tapped. */
     var onPickIconClick: (() -> Unit)? = null
 
-    /** Shows the widget button only when a real pack overrides this app's icon. */
+    /** Shows the custom icon picker action. */
     var pickButtonVisible: Boolean = false
         set(value) {
             if (field != value) {

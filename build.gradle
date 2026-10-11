@@ -76,6 +76,7 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix ".debug"
+            versionNameSuffix "-icon-test"
             debuggable true
             minifyEnabled false
         }
@@ -136,6 +137,15 @@ android {
     }
 
     sourceSets {
+        debug {
+            res.srcDirs = ['res_debug']
+        }
+
+        test {
+            java.srcDirs = ['tests/unit']
+            kotlin.directories.addAll(['tests/unit'])
+        }
+
         main {
             res.srcDirs = ['res']
             java.srcDirs = ['src', 'src_plugins' /*, 'tests/shared', 'system_ext', 'tests/multivalentTests/shared', 'systemui_core/shared'*/]
@@ -345,6 +355,7 @@ dependencies {
     ksp libs.dagger.compiler
 
     testImplementation libs.junit
+    testImplementation 'net.sf.kxml:kxml2:2.3.0'
     androidTestImplementation libs.mockito.core
     androidTestImplementation libs.dexmaker
     androidTestImplementation libs.dexmaker.mockito
