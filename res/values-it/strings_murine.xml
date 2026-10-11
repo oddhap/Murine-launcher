@@ -166,6 +166,13 @@
 
     <!-- Per-app custom icon picker -->
     <string name="icon_picker_search_hint">Cerca icone...</string>
+    <string name="icon_picker_all_icons">Tutte le icone</string>
+    <string name="icon_picker_system_icon">Icona originale dell’app</string>
+    <string name="icon_picker_loading">Caricamento delle icone…</string>
+    <string name="icon_picker_empty">Nessuna icona disponibile in questo pacchetto.</string>
+    <string name="icon_picker_no_results">Nessuna icona corrispondente.</string>
+    <string name="icon_picker_no_packs">Installa un pacchetto di icone per scegliere un’icona personalizzata.</string>
+    <string name="icon_picker_pack_default">Usa l’icona dell’app di questo pacchetto</string>
 
     <!-- Clear custom icons -->
     <string name="pref_clear_custom_icons_title">Cancella icone personalizzate</string>

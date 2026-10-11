@@ -1066,21 +1066,19 @@ object IconPackManager {
      * falling back to distinct appfilter.xml values. Volatile: never stored in a cache
      * (except the primary cache reuse for the global pack's appfilter fallback).
      */
-    fun listPackDrawables(context: Context, packPackage: String): List<String> {
+    fun listPackDrawables(context: Context, packPackage: String): List<String> =
+        listPackCategories(context, packPackage).flatMap { it.second }
+
+    /** Pack-defined categories, with an appfilter fallback for packs without drawable.xml. */
+    fun listPackCategories(context: Context, packPackage: String): List<Pair<String, List<String>>> {
         if (packPackage == SYSTEM_ICON_PACK) return emptyList()
-        val fromManifest = LinkedHashSet<String>()
-        withPackXml(context, packPackage, "drawable") { parser ->
-            var eventType = parser.eventType
-            while (eventType != XmlPullParser.END_DOCUMENT) {
-                if (eventType == XmlPullParser.START_TAG && parser.name == "item") {
-                    parser.getAttributeValue(null, "drawable")
-                        ?.takeIf { it.isNotEmpty() }?.let { fromManifest.add(it) }
-                }
-                eventType = parser.next()
-            }
+        val defaultTitle = context.getString(R.string.icon_picker_all_icons)
+        val categories = withPackXml(context, packPackage, "drawable") { parser ->
+            IconPackCategories.parse(parser, defaultTitle)
         }
-        if (fromManifest.isNotEmpty()) return fromManifest.toList()
-        return getComponentMapForPack(context, packPackage).values.distinct()
+        if (!categories.isNullOrEmpty()) return categories
+        val names = getComponentMapForPack(context, packPackage).values.distinct().sorted()
+        return if (names.isEmpty()) emptyList() else listOf(defaultTitle to names)
     }
 
     /**
@@ -1124,7 +1122,7 @@ object IconPackManager {
     /**
      * Configures a [RadioGroupPreference] for icon pack selection.
      * @param perAppComponent non-null for per-app overrides (component key);
-     *        EDIT: discontinued for per-app overrides in favor of FilterableIconPackSheet
+     *        Per-app choices use IconPickerBottomSheet instead
      */
     @JvmStatic
     @JvmOverloads

@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.os.Bundle
-import android.os.SystemClock
 import android.text.Editable
 import android.text.TextWatcher
 import android.util.LruCache
@@ -12,6 +11,9 @@ import android.util.TypedValue
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
+import android.widget.Spinner
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.TextView
@@ -27,33 +29,29 @@ import app.murinelauncher.widget.radio.RadioGroupBottomSheet
 import java.text.StringCharacterIterator
 import com.android.launcher3.R
 import com.android.launcher3.util.Executors
+import com.google.android.material.bottomsheet.BottomSheetBehavior
+import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 
 /**
  * Bottom sheet that lets the user pick a specific drawable from an icon pack
- * as the per-app icon override.
+ * as the per-app icon override, with a selector for every installed pack.
  *
  * Icons the pack associates with the app itself (appfilter entries for its package)
- * are listed first under a separator, followed by the pack's full drawable list.
+ * are listed first, followed by the categories supplied by the pack.
  * Listing follows [IconPackManager]'s cache policy: the globally selected pack goes
  * through the primary cache, any other pack is parsed volatilely.
  */
 class IconPickerBottomSheet : BottomSheetDialogFragment() {
 
-    fun interface OnIconPickedListener {
-        fun onIconPicked(drawableName: String)
-    }
+    private var loadGeneration = 0
 
-    private var packPackage: String? = null
-    private var componentKey: String = ""
-    private var sheetTitle: CharSequence = ""
-    private var listener: OnIconPickedListener? = null
-
-    fun configure(packPackage: String, title: CharSequence, componentKey: String, listener: OnIconPickedListener) {
-        this.packPackage = packPackage
-        this.sheetTitle = title
-        this.componentKey = componentKey
-        this.listener = listener
+    fun configure(packPackage: String, title: CharSequence, componentKey: String) {
+        arguments = Bundle().apply {
+            putString(KEY_PACK, packPackage)
+            putString(KEY_COMPONENT, componentKey)
+            putCharSequence(KEY_TITLE, title)
+        }
     }
 
     override fun getTheme(): Int =
@@ -64,78 +62,115 @@ class IconPickerBottomSheet : BottomSheetDialogFragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        // Configured programmatically; nothing to restore after process recreation
-        val pack = packPackage ?: run { dismissAllowingStateLoss(); return }
-
-        view.findViewById<TextView>(R.id.sheet_title)?.text = sheetTitle
+        val args = arguments ?: run { dismissAllowingStateLoss(); return }
+        val componentKey = args.getString(KEY_COMPONENT) ?: run { dismissAllowingStateLoss(); return }
+        view.findViewById<TextView>(R.id.sheet_title).text = args.getCharSequence(KEY_TITLE)
         dialog?.setOnShowListener { RadioGroupBottomSheet.applyAdjustedBackgroundTint(dialog) }
-
         val ctx = view.context
         val appCtx = ctx.applicationContext
-        val adapter = IconGridAdapter(ctx, pack) { name ->
-            listener?.onIconPicked(name)
+        val grid = view.findViewById<RecyclerView>(R.id.icon_grid)
+        val search = view.findViewById<EditText>(R.id.search_bar)
+        val status = view.findViewById<TextView>(R.id.icon_picker_status)
+        var currentAdapter: IconGridAdapter? = null
+
+        fun pick(pack: String?, drawable: String? = null) {
+            parentFragmentManager.setFragmentResult(RESULT_KEY, Bundle().apply {
+                putString(KEY_COMPONENT, componentKey)
+                putString(KEY_PACK, pack)
+                putString(KEY_DRAWABLE, drawable)
+            })
             dismiss()
         }
-        view.findViewById<RecyclerView>(R.id.icon_grid)?.apply {
-            layoutManager = GridLayoutManager(ctx, SPAN_COUNT).also { glm ->
+        view.findViewById<View>(R.id.icon_reset_default).setOnClickListener { pick(null) }
+        view.findViewById<View>(R.id.icon_use_system).setOnClickListener { pick(IconPackManager.SYSTEM_ICON_PACK) }
+
+        fun loadPack(pack: String) {
+            args.putString(KEY_PACK, pack)
+            val generation = ++loadGeneration
+            status.setText(R.string.icon_picker_loading)
+            status.visibility = View.VISIBLE
+            val adapter = IconGridAdapter(ctx, pack) { name -> pick(pack, name) }
+            currentAdapter = adapter
+            grid.layoutManager = GridLayoutManager(ctx, SPAN_COUNT).also { glm ->
                 glm.spanSizeLookup = object : GridLayoutManager.SpanSizeLookup() {
                     override fun getSpanSize(position: Int): Int =
                         if (adapter.isHeader(position)) SPAN_COUNT else 1
                 }
             }
-            this.adapter = adapter
+            grid.adapter = adapter
+            var loaded = false
+            var hasIcons = false
+            adapter.onRowsChanged = { count ->
+                if (loaded) {
+                    status.visibility = if (count == 0) View.VISIBLE else View.GONE
+                    status.setText(if (hasIcons) R.string.icon_picker_no_results else R.string.icon_picker_empty)
+                }
+            }
+            val usePackDefault = view.findViewById<View>(R.id.icon_use_pack_default)
+            usePackDefault.isEnabled = false
+            usePackDefault.setOnClickListener { pick(pack) }
+            Executors.MODEL_EXECUTOR.execute {
+                val hasMappedIcon = IconPackManager.hasIconForComponent(appCtx, pack, componentKey)
+                val res = IconPackManager.getPackResources(appCtx, pack)
+                fun valid(name: String) = res != null && res.getIdentifier(name, "drawable", pack) != 0
+                val appIcons = IconPackManager.getPackIconsForApp(appCtx, pack, componentKey).filter(::valid)
+                val suggested = appIcons.toSet()
+                val sections = IconPackManager.listPackCategories(appCtx, pack).mapNotNull { (title, icons) ->
+                    val validIcons = icons.filter { it !in suggested && valid(it) }
+                    if (validIcons.isEmpty()) null else title to validIcons
+                }
+                Executors.MAIN_EXECUTOR.execute publish@{
+                    if (this.view !== view || generation != loadGeneration) return@publish
+                    usePackDefault.isEnabled = hasMappedIcon && res != null
+                    loaded = true
+                    hasIcons = appIcons.isNotEmpty() || sections.isNotEmpty()
+                    adapter.filter(search.text.toString())
+                    adapter.submit(appIcons, sections)
+                }
+            }
         }
 
-        view.findViewById<EditText>(R.id.search_bar)?.addTextChangedListener(object : TextWatcher {
-            override fun afterTextChanged(s: Editable?) = adapter.filter(s?.toString().orEmpty())
+        search.addTextChangedListener(object : TextWatcher {
+            override fun afterTextChanged(s: Editable?) { currentAdapter?.filter(s?.toString().orEmpty()) }
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
         })
-
-        Executors.MODEL_EXECUTOR.execute {
-            val appIcons = IconPackManager.getPackIconsForApp(appCtx, pack, componentKey)
-            val allIcons = IconPackManager.listPackDrawables(appCtx, pack).filterNot(appIcons.toSet()::contains).sorted()
-
-            // Bucket by first character; Anything not a letter goes to "#".
-            fun sectioned(names: List<String>) = names
-                .groupBy { name ->
-                    val c = name.firstOrNull()
-                    if (c?.isLetter() == true) c.uppercase() else "#"
-                }
-                .toList()
-                .sortedBy { it.first }
-
-            // Instant, unfiltered: blank icons (on some packs like 'Nothing Icons') are handled by removeIcon until the postDelayed removal has finished
-            // Hybrid approach makes for a responsive UI (constant removeIcon calls would cause sluggishness, waiting for a filter would cause an initial delay)
-            val sections = sectioned(allIcons)
-            Executors.MAIN_EXECUTOR.execute {
-                if (isAdded) adapter.submit(appIcons, sections)
-            }
-
-            // One-shot Lawnchair-style blank icon resolution scan, committed as a single submit when done;
-            Executors.MODEL_EXECUTOR.handler.postDelayed({
-                if (!isAdded) return@postDelayed
-                val packRes = IconPackManager.getPackResources(appCtx, pack) ?: return@postDelayed
-                val valid = HashSet<String>(allIcons.size)
-                // Time-based yield batch, can grab the AssetManager lock between work slices
-                var lastYield = SystemClock.uptimeMillis()
-                allIcons.filterTo(valid) { name ->
-                    if (SystemClock.uptimeMillis() - lastYield > SCAN_WORK_MS) {
-                        Thread.sleep(SCAN_YIELD_MS)
-                        lastYield = SystemClock.uptimeMillis()
-                    }
-                    packRes.getIdentifier(name, "drawable", pack) != 0
-                }
-                if (valid.size != allIcons.size) {
-                    // Suggestions were subtracted from allIcons, so they need their own check
-                    val validApp = appIcons.filter { packRes.getIdentifier(it, "drawable", pack) != 0 }
-                    val validSections = sectioned(allIcons.filter { it in valid })
-                    Executors.MAIN_EXECUTOR.execute {
-                        if (isAdded) adapter.submit(validApp, validSections)
-                    }
-                }
-            }, SCAN_START_DELAY);
+        val packs = IconPackManager.getInstalledPacks(ctx).filter { it.packageName != IconPackManager.SYSTEM_ICON_PACK }
+        val selector = view.findViewById<Spinner>(R.id.icon_pack_selector)
+        if (packs.isEmpty()) {
+            view.findViewById<View>(R.id.icon_use_pack_default).visibility = View.GONE
+            selector.visibility = View.GONE
+            search.visibility = View.GONE
+            grid.visibility = View.GONE
+            status.setText(R.string.icon_picker_no_packs)
+            return
         }
+        selector.adapter = ArrayAdapter(ctx, android.R.layout.simple_spinner_item, packs.map { it.label }).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        val initialIndex = packs.indexOfFirst { it.packageName == args.getString(KEY_PACK) }.coerceAtLeast(0)
+        selector.setSelection(initialIndex)
+        loadPack(packs[initialIndex].packageName)
+        selector.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, item: View?, position: Int, id: Long) {
+                val pack = packs[position].packageName
+                if (pack != args.getString(KEY_PACK)) loadPack(pack)
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        (dialog as? BottomSheetDialog)?.behavior?.apply {
+            skipCollapsed = true
+            state = BottomSheetBehavior.STATE_EXPANDED
+        }
+    }
+
+    override fun onDestroyView() {
+        ++loadGeneration
+        super.onDestroyView()
     }
 
     /**
@@ -167,6 +202,8 @@ class IconPickerBottomSheet : BottomSheetDialogFragment() {
         }
         private var rows: List<Row> = emptyList()
 
+        var onRowsChanged: ((Int) -> Unit)? = null
+
         fun isHeader(position: Int): Boolean = rows[position].header != null
 
         fun submit(app: List<String>, sections: List<Pair<String, List<String>>>) {
@@ -191,7 +228,8 @@ class IconPickerBottomSheet : BottomSheetDialogFragment() {
         }
 
         private fun List<String>.filterQuery(search: StringSearch?): List<String> {
-            search ?: return this
+            if (query.isEmpty()) return this
+            if (search == null) return filter { it.contains(query, ignoreCase = true) }
             return filter { name ->
                 search.setTarget(StringCharacterIterator(name))
                 search.first() != SearchIterator.DONE
@@ -215,6 +253,7 @@ class IconPickerBottomSheet : BottomSheetDialogFragment() {
                 }
             }
             notifyDataSetChanged()
+            onRowsChanged?.invoke(rows.size)
         }
 
         override fun getItemCount(): Int = rows.size
@@ -258,17 +297,21 @@ class IconPickerBottomSheet : BottomSheetDialogFragment() {
             iv.setOnClickListener { onClick(name) }
             iv.tag = name
             val cached = bitmapCache.get(name)
+            iv.isEnabled = cached != null
             if (cached != null) {
                 iv.setImageBitmap(cached)
                 return
             }
             iv.setImageBitmap(null)
             Executors.THREAD_POOL_EXECUTOR.execute {
-                val bmp = renderIcon(name)
+                val bmp = runCatching { renderIcon(name) }.getOrNull()
                 if (bmp != null) {
                     bitmapCache.put(name, bmp)
                     Executors.MAIN_EXECUTOR.execute {
-                        if (iv.tag == name) iv.setImageBitmap(bmp)
+                        if (iv.tag == name) {
+                            iv.setImageBitmap(bmp)
+                            iv.isEnabled = true
+                        }
                     }
                 } else {
                     // Unresolvable names are removed.
@@ -287,13 +330,12 @@ class IconPickerBottomSheet : BottomSheetDialogFragment() {
         }
 
         /**
-         * Drops an unresolvable icon from the data set (invoked on the main thread);
-         * Not needed once the postDelayed scan has fully evaluated
+         * Drops a drawable that exists in the manifest but fails to render.
          */
         private fun removeIcon(name: String) {
             val inApp = name in appIcons
             val inSections = allSections.any { name in it.second }
-            if (!inApp && !inSections) return // already removed (scan committed / duplicate render)
+            if (!inApp && !inSections) return // already removed by another render
             if (inApp) appIcons = appIcons - name
             if (inSections) {
                 allSections = allSections.mapNotNull { (title, icons) ->
@@ -318,12 +360,10 @@ class IconPickerBottomSheet : BottomSheetDialogFragment() {
     companion object {
         const val TAG = "IconPickerBottomSheet"
         private const val SPAN_COUNT = 4
-        /**
-         * Scan variables are used for the empty icon scanning batch
-         * The scan yields [SCAN_YIELD_MS] per [SCAN_WORK_MS] of work: AssetManager lock fairness.
-         */
-        private const val SCAN_WORK_MS = 20L
-        private const val SCAN_YIELD_MS = 2L
-        private const val SCAN_START_DELAY = 100L
+        const val RESULT_KEY = "murine_icon_picked"
+        const val KEY_PACK = "icon_pack"
+        const val KEY_COMPONENT = "component"
+        const val KEY_DRAWABLE = "drawable"
+        private const val KEY_TITLE = "title"
     }
 }
